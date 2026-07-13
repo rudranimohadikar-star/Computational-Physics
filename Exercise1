@@ -1,52 +1,67 @@
 from pathlib import Path
-from io import StringIO
 import pandas as pd
 
 
 def parse_lamps_log(log_file):
-
     log_file = Path(log_file)
 
+    blocks = []      # holds one DataFrame per thermo block
     rows = []
     header = None
-    reading_block =  False
+    reading_block = False
 
-    with open(log_file, "r", errors = "ignore") as f:
+    def flush_block():
+        """Turn the current rows+header into a DataFrame and store it."""
+        nonlocal rows, header
+        if header and rows:
+            blocks.append(pd.DataFrame(rows, columns=header))
+        rows = []
+
+    with open(log_file, "r", errors="ignore") as f:
         for line in f:
             line = line.strip()
 
-            #detect thermo header
-            if line.startswith("step"):
-                header = line.split()
+            # detect thermo header
+            if line.lower().startswith("step"):
+                flush_block()  # save previous block before starting a new one
+                header = [h.lower() for h in line.split()]
                 reading_block = True
+                continue
 
-        #end of thermo block
-            if line.startswith("Loop Time"):
+            # end of thermo block
+            if line.lower().startswith("loop time"):
+                flush_block()
                 reading_block = False
                 continue
 
-        #parsing
+            # parsing
             if reading_block and header:
                 parts = line.split()
-
                 if len(parts) == len(header):
                     try:
                         values = [float(x) for x in parts]
                         rows.append(values)
                     except ValueError:
                         pass
-            df = pd.DataFrame(rows, columns=header)
 
-            #step to integer
-            df["step"] = df["step"].astype(int)
+    flush_block()  # catch any trailing block not closed by "Loop time"
 
-        df = df.drop_duplicates(subset="step", keep="last")
+    if not blocks:
+        raise ValueError(f"No thermo data found in {log_file}")
 
-        df["source_file"] = log_file.name
+    # combine all blocks; columns that don't exist in a block become NaN
+    df = pd.concat(blocks, ignore_index=True, sort=False)
 
-        return df
+    df["step"] = df["step"].astype(int)
+    df = df.drop_duplicates(subset="step", keep="last")
+    df["source_file"] = log_file.name
+
+    return df
+
+
 # Run the function
-df = parse_lamps_log("log140-1.sec")
+SCRIPT_DIR = Path(__file__).resolve().parent
+log_file_path = SCRIPT_DIR / "log140-2.sec"
+df = parse_lamps_log(log_file_path)
 
-# Display the DataFrame
 print(df)
