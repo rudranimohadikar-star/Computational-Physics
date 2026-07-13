@@ -1,11 +1,3 @@
-"""
-lammps_log_parser.py
-
-Parse LAMMPS thermo log files (log.* files), extract only the thermo
-blocks relevant to the stress-strain simulation (i.e. blocks that report
-both box length 'Lx' and stress 'Pxx'), and plot stress-strain curves -
-optionally smoothed with a rolling average.
-"""
 
 import re
 from pathlib import Path
@@ -14,15 +6,7 @@ import matplotlib.pyplot as plt
 
 
 def parse_lammps_log(log_file, required_columns=("lx", "pxx")):
-    """
-    Parse a single LAMMPS log file and return a DataFrame containing only
-    the thermo blocks whose header includes ALL of `required_columns`.
-
-    This is what implements "ignore unrelated sections": any thermo
-    block (e.g. minimization, plain equilibration) that doesn't report
-    every column in `required_columns` is skipped entirely, instead of
-    being concatenated in with a bunch of NaNs.
-    """
+    
     log_file = Path(log_file)
 
     blocks = []
@@ -86,11 +70,7 @@ def _natural_key(path):
 
 
 def parse_lammps_folder(folder, pattern="log.*", required_columns=("lx", "pxx")):
-    """
-    Parse every file in `folder` whose name matches `pattern`
-    (default: files starting with 'log.'), in correct numeric sequence,
-    and concatenate the results into one DataFrame.
-    """
+    
     folder = Path(folder)
     files = sorted(folder.glob(pattern), key=_natural_key)
 
@@ -111,11 +91,8 @@ def parse_lammps_folder(folder, pattern="log.*", required_columns=("lx", "pxx"))
 
 
 def plot_stress_strain(df, strain_col="lx", stress_col="pxx",
-                        rolling_window=10, ax=None):
-    """
-    Plot a stress-strain curve from `df`, optionally smoothed with a
-    rolling average. Set rolling_window=None or 1 to disable smoothing.
-    """
+                        rolling_window=None, ax=None):
+    
     if ax is None:
         _, ax = plt.subplots(figsize=(8, 5))
 
@@ -140,13 +117,13 @@ if __name__ == "__main__":
     SCRIPT_DIR = Path(__file__).resolve().parent
 
     # --- Task 1: single file ---
-    df = parse_lammps_log(SCRIPT_DIR / "log.140-1")
+    df = parse_lammps_log(SCRIPT_DIR / "log140-2.sec")
     plot_stress_strain(df, rolling_window=10)
     plt.savefig(SCRIPT_DIR / "stress_strain_single.png", dpi=150)
     plt.close()
 
     # --- Task 2: whole folder, in sequence, smoothed ---
-    df_all = parse_lammps_folder(SCRIPT_DIR, pattern="log.*")
+    df_all = parse_lammps_folder(SCRIPT_DIR, pattern="*.sec")
     plot_stress_strain(df_all, rolling_window=10)
     plt.savefig(SCRIPT_DIR / "stress_strain_all.png", dpi=150)
     plt.close()

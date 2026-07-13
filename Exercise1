@@ -1,5 +1,6 @@
 from pathlib import Path
 import pandas as pd
+import matplotlib.pyplot as plt
 
 
 def parse_lamps_log(log_file):
@@ -57,7 +58,6 @@ def parse_lamps_log(log_file):
     df["source_file"] = log_file.name
 
     return df
-
 
 # Run the function
 SCRIPT_DIR = Path(__file__).resolve().parent
