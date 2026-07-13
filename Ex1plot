@@ -1,0 +1,154 @@
+"""
+lammps_log_parser.py
+
+Parse LAMMPS thermo log files (log.* files), extract only the thermo
+blocks relevant to the stress-strain simulation (i.e. blocks that report
+both box length 'Lx' and stress 'Pxx'), and plot stress-strain curves -
+optionally smoothed with a rolling average.
+"""
+
+import re
+from pathlib import Path
+import pandas as pd
+import matplotlib.pyplot as plt
+
+
+def parse_lammps_log(log_file, required_columns=("lx", "pxx")):
+    """
+    Parse a single LAMMPS log file and return a DataFrame containing only
+    the thermo blocks whose header includes ALL of `required_columns`.
+
+    This is what implements "ignore unrelated sections": any thermo
+    block (e.g. minimization, plain equilibration) that doesn't report
+    every column in `required_columns` is skipped entirely, instead of
+    being concatenated in with a bunch of NaNs.
+    """
+    log_file = Path(log_file)
+
+    blocks = []
+    rows = []
+    header = None
+    reading_block = False
+    keep_block = False
+
+    def flush_block():
+        nonlocal rows, header, keep_block
+        if header and rows and keep_block:
+            blocks.append(pd.DataFrame(rows, columns=header))
+        rows = []
+
+    with open(log_file, "r", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+
+            # detect a new thermo header
+            if line.lower().startswith("step"):
+                flush_block()
+                header = [h.lower() for h in line.split()]
+                keep_block = all(col in header for col in required_columns)
+                reading_block = True
+                continue
+
+            # end of a thermo block
+            if line.lower().startswith("loop time"):
+                flush_block()
+                reading_block = False
+                header = None
+                continue
+
+            # parse a data row, only if this block is one we want
+            if reading_block and header and keep_block:
+                parts = line.split()
+                if len(parts) == len(header):
+                    try:
+                        values = [float(x) for x in parts]
+                        rows.append(values)
+                    except ValueError:
+                        pass
+
+    flush_block()  # catch a trailing block not closed by "Loop time"
+
+    if not blocks:
+        raise ValueError(
+            f"No thermo blocks with columns {required_columns} found in {log_file}"
+        )
+
+    df = pd.concat(blocks, ignore_index=True, sort=False)
+    df["step"] = df["step"].astype(int)
+    df = df.drop_duplicates(subset="step", keep="last")
+    df["source_file"] = log_file.name
+    return df
+
+
+def _natural_key(path):
+    """Sort 'log.140-1', 'log.140-2', 'log.140-10' in numeric, not alphabetic, order."""
+    return [int(n) for n in re.findall(r"\d+", path.name)]
+
+
+def parse_lammps_folder(folder, pattern="log.*", required_columns=("lx", "pxx")):
+    """
+    Parse every file in `folder` whose name matches `pattern`
+    (default: files starting with 'log.'), in correct numeric sequence,
+    and concatenate the results into one DataFrame.
+    """
+    folder = Path(folder)
+    files = sorted(folder.glob(pattern), key=_natural_key)
+
+    if not files:
+        raise FileNotFoundError(f"No files matching '{pattern}' found in {folder}")
+
+    all_dfs = []
+    for f in files:
+        try:
+            all_dfs.append(parse_lammps_log(f, required_columns=required_columns))
+        except ValueError as e:
+            print(f"Skipping {f.name}: {e}")
+
+    if not all_dfs:
+        raise ValueError(f"No usable thermo data found in any file in {folder}")
+
+    return pd.concat(all_dfs, ignore_index=True, sort=False)
+
+
+def plot_stress_strain(df, strain_col="lx", stress_col="pxx",
+                        rolling_window=10, ax=None):
+    """
+    Plot a stress-strain curve from `df`, optionally smoothed with a
+    rolling average. Set rolling_window=None or 1 to disable smoothing.
+    """
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 5))
+
+    x = df[strain_col]
+    y = df[stress_col]
+
+    ax.plot(x, y, alpha=0.3, color="tab:blue", label="raw")
+
+    if rolling_window and rolling_window > 1:
+        y_smooth = y.rolling(window=rolling_window, min_periods=1, center=True).mean()
+        ax.plot(x, y_smooth, color="tab:red", linewidth=2,
+                label=f"rolling avg (window={rolling_window})")
+
+    ax.set_xlabel(strain_col)
+    ax.set_ylabel(stress_col)
+    ax.set_title("Stress-Strain Curve")
+    ax.legend()
+    return ax
+
+
+if __name__ == "__main__":
+    SCRIPT_DIR = Path(__file__).resolve().parent
+
+    # --- Task 1: single file ---
+    df = parse_lammps_log(SCRIPT_DIR / "log.140-1")
+    plot_stress_strain(df, rolling_window=10)
+    plt.savefig(SCRIPT_DIR / "stress_strain_single.png", dpi=150)
+    plt.close()
+
+    # --- Task 2: whole folder, in sequence, smoothed ---
+    df_all = parse_lammps_folder(SCRIPT_DIR, pattern="log.*")
+    plot_stress_strain(df_all, rolling_window=10)
+    plt.savefig(SCRIPT_DIR / "stress_strain_all.png", dpi=150)
+    plt.close()
+
+    print(df_all)
