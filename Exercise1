@@ -1,0 +1,52 @@
+from pathlib import Path
+from io import StringIO
+import pandas as pd
+
+
+def parse_lamps_log(log_file):
+
+    log_file = Path(log_file)
+
+    rows = []
+    header = None
+    reading_block =  False
+
+    with open(log_file, "r", errors = "ignore") as f:
+        for line in f:
+            line = line.strip()
+
+            #detect thermo header
+            if line.startswith("step"):
+                header = line.split()
+                reading_block = True
+
+        #end of thermo block
+            if line.startswith("Loop Time"):
+                reading_block = False
+                continue
+
+        #parsing
+            if reading_block and header:
+                parts = line.split()
+
+                if len(parts) == len(header):
+                    try:
+                        values = [float(x) for x in parts]
+                        rows.append(values)
+                    except ValueError:
+                        pass
+            df = pd.DataFrame(rows, columns=header)
+
+            #step to integer
+            df["step"] = df["step"].astype(int)
+
+        df = df.drop_duplicates(subset="step", keep="last")
+
+        df["source_file"] = log_file.name
+
+        return df
+# Run the function
+df = parse_lamps_log("log140-1.sec")
+
+# Display the DataFrame
+print(df)
